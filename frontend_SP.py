@@ -1,9 +1,8 @@
 import PySimpleGUI as sg
-from queue import Queue
-from threading import Thread
+import threading  # Import threading for running the backend in a separate thread
+import backend2_SP  # Import your backend script
 
-# Shared queue to get data from the backend
-data_queue = Queue()
+# Define flower preferences
 flower_preferences = {
     'Storczyk': {'temp': 20, 'humidity': 60},
     'Monstera': {'temp': 22, 'humidity': 50},
@@ -42,54 +41,14 @@ window = sg.Window('Main', layout, finalize=True)
 homepage_window = sg.Window('homepage', layout_home, finalize=True)
 homepage_window.hide()  # Hide the homepage window initially
 
+# Function to start backend processing in a separate thread
+def start_backend():
+    backend2_SP.process_sensor_data()
 
-# Function to update GUI elements based on data_queue
-def update_gui():
-    while True:
-        event, values = homepage_window.read(timeout=1000)
-
-        if event == sg.WIN_CLOSED:
-            break
-
-        # Read sensor data from the queue
-        if not data_queue.empty():
-            temperature, humidity, alert, avg_five_min_temperature, avg_five_min_humidity, avg_thirty_min_temperature, avg_thirty_min_humidity, avg_hour_temperature, avg_hour_humidity = data_queue.get()
-
-            homepage_window['-TEMP-'].update(f"{temperature:.2f} C")
-            homepage_window['-HUM-'].update(f"{humidity:.2f} %")
-
-            mean_period = values['-MEAN-']
-            if mean_period == '5 minut':
-                mean_temp = avg_five_min_temperature
-                mean_hum = avg_five_min_humidity
-            elif mean_period == '30 minut':
-                mean_temp = avg_thirty_min_temperature
-                mean_hum = avg_thirty_min_humidity
-            elif mean_period == '1 godziny':
-                mean_temp = avg_hour_temperature
-                mean_hum = avg_hour_humidity
-            else:
-                mean_temp = mean_hum = None
-
-            homepage_window['-MEAN-TEMP-'].update(f"{mean_temp:.2f} C" if mean_temp is not None else "N/A")
-            homepage_window['-MEAN-HUM-'].update(f"{mean_hum:.2f} %" if mean_hum is not None else "N/A")
-
-            # Update status based on current flower selection
-            current_flower = values['-FLOWER-']
-            if current_flower in flower_preferences:
-                pref_temp = flower_preferences[current_flower]['temp']
-                pref_hum = flower_preferences[current_flower]['humidity']
-
-                if pref_temp <= temperature <= pref_hum:
-                    homepage_window['-STATUS-'].update(f"Twój kwiatek czuje się w porządku!")
-                else:
-                    homepage_window['-STATUS-'].update(f"Twój kwiatek nie czuje się dobrze!")
-
-
-# Start the GUI update thread
-gui_thread = Thread(target=update_gui)
-gui_thread.daemon = True
-gui_thread.start()
+# Start the backend processing in a separate thread
+backend_thread = threading.Thread(target=start_backend)
+backend_thread.daemon = True  # Daemonize the thread so it exits when the main program exits
+backend_thread.start()
 
 # Event Loop to process "events" and get the "values" of the inputs
 window_active, homepage_active = True, False
@@ -122,6 +81,47 @@ while True:
         if event == sg.WIN_CLOSED:
             homepage_active = False
             break
+
+        # Update GUI elements with sensor data
+        temperature_store = backend2_SP.temperature_store
+        humidity_store = backend2_SP.humidity_store
+
+        if temperature_store:
+            temperature = temperature_store[-1]
+            homepage_window['-TEMP-'].update(f"{temperature:.2f} C")
+
+        if humidity_store:
+            humidity = humidity_store[-1]
+            homepage_window['-HUM-'].update(f"{humidity:.2f} %")
+
+        # Update mean values based on selected period
+        mean_period = values['-MEAN-']
+        if mean_period == '5 minut':
+            mean_temp = sum(temperature_store[-5:]) / len(temperature_store[-5:]) if temperature_store else None
+            mean_hum = sum(humidity_store[-5:]) / len(humidity_store[-5:]) if humidity_store else None
+        elif mean_period == '30 minut':
+            mean_temp = sum(temperature_store[-30:]) / len(temperature_store[-30:]) if temperature_store else None
+            mean_hum = sum(humidity_store[-30:]) / len(humidity_store[-30:]) if humidity_store else None
+        elif mean_period == '1 godziny':
+            mean_temp = sum(temperature_store[-60:]) / len(temperature_store[-60:]) if temperature_store else None
+            mean_hum = sum(humidity_store[-60:]) / len(humidity_store[-60:]) if humidity_store else None
+        else:
+            mean_temp = mean_hum = None
+
+        homepage_window['-MEAN-TEMP-'].update(f"{mean_temp:.2f} C" if mean_temp is not None else "N/A")
+        homepage_window['-MEAN-HUM-'].update(f"{mean_hum:.2f} %" if mean_hum is not None else "N/A")
+
+        # Update status based on current flower selection
+        current_flower = values['-FLOWER-']
+        if current_flower in flower_preferences:
+            pref_temp = flower_preferences[current_flower]['temp']
+            pref_hum = flower_preferences[current_flower]['humidity']
+
+            if temperature is not None and humidity is not None:
+                if pref_temp <= temperature <= pref_hum:
+                    homepage_window['-STATUS-'].update(f"Twój kwiatek czuje się w porządku!")
+                else:
+                    homepage_window['-STATUS-'].update(f"Twój kwiatek nie czuje się dobrze!")
 
 window.close()
 homepage_window.close()

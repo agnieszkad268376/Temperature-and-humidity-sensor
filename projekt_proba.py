@@ -2,6 +2,7 @@ import serial
 import time
 import re
 import PySimpleGUI as sg
+from threading import Thread
 
 # Ustawienia portu szeregowego
 ser = serial.Serial('COM5', 9600, timeout=1)  # Zmień 'COM5' na odpowiedni port
@@ -52,38 +53,36 @@ def hour_mean(humidities, temperatures):
         return avg_hour_humidity, avg_hour_temperature
     return None, None
 
-# Layout for PySimpleGUI
-layout = [
-    [sg.Text("Current Readings")],
-    [sg.Text("Humidity:", size=(20, 1)), sg.Text("", size=(20, 1), key="humidity")],
-    [sg.Text("Temperature:", size=(20, 1)), sg.Text("", size=(20, 1), key="temperature")],
-    [sg.Text("Average Readings (Last Minute)")],
-    [sg.Text("Average Humidity:", size=(20, 1)), sg.Text("", size=(20, 1), key="avg_humidity")],
-    [sg.Text("Average Temperature:", size=(20, 1)), sg.Text("", size=(20, 1), key="avg_temperature")],
-    [sg.Text("Average Readings (Last 5 Minutes)")],
-    [sg.Text("5-Minute Average Humidity:", size=(20, 1)), sg.Text("", size=(20, 1), key="avg_five_min_humidity")],
-    [sg.Text("5-Minute Average Temperature:", size=(20, 1)), sg.Text("", size=(20, 1), key="avg_five_min_temperature")],
-    [sg.Text("Average Readings (Last 30 Minutes)")],
-    [sg.Text("30-Minute Average Humidity:", size=(20, 1)), sg.Text("", size=(20, 1), key="avg_thirty_min_humidity")],
-    [sg.Text("30-Minute Average Temperature:", size=(20, 1)), sg.Text("", size=(20, 1), key="avg_thirty_min_temperature")],
-    [sg.Text("Average Readings (Last Hour)")],
-    [sg.Text("Hourly Average Humidity:", size=(20, 1)), sg.Text("", size=(20, 1), key="avg_hour_humidity")],
-    [sg.Text("Hourly Average Temperature:", size=(20, 1)), sg.Text("", size=(20, 1), key="avg_hour_temperature")],
-    [sg.Button("Exit")]
+# Layout for the initial window
+layout = [[sg.Text("Wybierz swojego kwiatka")],
+          [sg.Combo(['Storczyk', 'Monstera', 'Pieniążek', 'Fikus'], default_value='', readonly=True, key='-FLOWER-')],
+          [sg.Text("Nazwij swojego kwiatka")],
+          [sg.InputText(key='-NAME-')],
+          [sg.Button('Submit')]]
+
+# Layout for the homepage window
+layout_home = [
+    [sg.Column([
+        [sg.Button('Chart', size=(10, 1))],
+        [sg.Text("Pokaż średnią z:")],
+        [sg.Combo(['5 minut', '30 minut', '1 godziny'], default_value='', readonly=True)]
+    ]),
+    sg.VerticalSeparator(),
+    sg.Column([
+        [sg.Text("Twój kwiatek czuje się w porządku!")],
+        [sg.Text("Temperature"), sg.Text("Wilgotność")]
+    ])]
 ]
 
-window = sg.Window("Sensor Data Logger", layout)
+# Create both windows with finalize=True
+window = sg.Window('Main', layout, finalize=True)
+homepage_window = sg.Window('homepage', layout_home, finalize=True)
+homepage_window.hide()  # Hide the homepage window initially
 
-minute_counter = 0
-five_minute_counter = 0
-thirty_minute_counter = 0
-
-try:
+# Function to handle sensor data reading
+def handle_sensor_data():
+    global minute_counter, five_minute_counter, thirty_minute_counter
     while True:
-        event, values = window.read(timeout=1000)  # Read every second
-        if event == sg.WIN_CLOSED or event == "Exit":
-            break
-
         # Odczyt danych z czujnika
         sensor_data = read_sensor_data()
         humidity_match = re.search(r'Wilgotnosc \(%\): (\d+\.\d+)', sensor_data)
@@ -93,9 +92,8 @@ try:
         temperature = float(temperature_match.group(1)) if temperature_match else None
         temperature = temperature - 3 if temperature is not None else None
 
-        # Aktualizacja wyświetlania danych
-        window["humidity"].update(f"{humidity:.2f}%" if humidity is not None else "N/A")
-        window["temperature"].update(f"{temperature:.2f}C" if temperature is not None else "N/A")
+        # Wyświetlenie danych w terminalu
+        print("Humidity:", humidity, "Temperature:", temperature)
 
         if humidity is not None:
             mean_humidity.append(humidity)
@@ -104,13 +102,12 @@ try:
 
         # Odczytanie co minute
         if len(mean_humidity) >= 60 and len(mean_temperature) >= 60:
-            # średnia wartość
+            #średnia wartość
             avg_humidity = sum(mean_humidity) / len(mean_humidity)
             avg_temperature = sum(mean_temperature) / len(mean_temperature)
 
-            # Aktualizacja wyświetlania średnich wartości
-            window["avg_humidity"].update(f"{avg_humidity:.2f}%")
-            window["avg_temperature"].update(f"{avg_temperature:.2f}C")
+            print(f"Average Humidity: {avg_humidity:.2f}%")
+            print(f"Average Temperature: {avg_temperature:.2f}C")
 
             # wyczyszczenie tablicy
             mean_humidity = []
@@ -127,8 +124,8 @@ try:
             if minute_counter >= 5:
                 avg_five_min_humidity, avg_five_min_temperature = five_minute_mean(minute_mean_humidity, minute_mean_temperature)
                 if avg_five_min_humidity is not None and avg_five_min_temperature is not None:
-                    window["avg_five_min_humidity"].update(f"{avg_five_min_humidity:.2f}%")
-                    window["avg_five_min_temperature"].update(f"{avg_five_min_temperature:.2f}C")
+                    print(f"5-Minute Average Humidity: {avg_five_min_humidity:.2f}%")
+                    print(f"5-Minute Average Temperature: {avg_five_min_temperature:.2f}C")
 
                 # Dodaj do tablic 5-minutowych średnich
                 five_minute_mean_humidity.append(avg_five_min_humidity)
@@ -143,8 +140,8 @@ try:
             if five_minute_counter >= 6:
                 avg_thirty_min_humidity, avg_thirty_min_temperature = thirty_minute_mean(five_minute_mean_humidity, five_minute_mean_temperature)
                 if avg_thirty_min_humidity is not None and avg_thirty_min_temperature is not None:
-                    window["avg_thirty_min_humidity"].update(f"{avg_thirty_min_humidity:.2f}%")
-                    window["avg_thirty_min_temperature"].update(f"{avg_thirty_min_temperature:.2f}C")
+                    print(f"30-Minute Average Humidity: {avg_thirty_min_humidity:.2f}%")
+                    print(f"30-Minute Average Temperature: {avg_thirty_min_temperature:.2f}C")
 
                 # Dodaj do tablic 30-minutowych średnich
                 thirty_minute_mean_humidity.append(avg_thirty_min_humidity)
@@ -159,8 +156,8 @@ try:
             if thirty_minute_counter >= 2:
                 avg_hour_humidity, avg_hour_temperature = hour_mean(thirty_minute_mean_humidity, thirty_minute_mean_temperature)
                 if avg_hour_humidity is not None and avg_hour_temperature is not None:
-                    window["avg_hour_humidity"].update(f"{avg_hour_humidity:.2f}%")
-                    window["avg_hour_temperature"].update(f"{avg_hour_temperature:.2f}C")
+                    print(f"Hourly Average Humidity: {avg_hour_humidity:.2f}%")
+                    print(f"Hourly Average Temperature: {avg_hour_temperature:.2f}C")
 
                 # Dodaj do tablic godzinowych średnich
                 hour_mean_humidity.append(avg_hour_humidity)
@@ -171,7 +168,45 @@ try:
                 thirty_minute_mean_temperature = []
                 thirty_minute_counter = 0
 
-except KeyboardInterrupt:
-    print("Program terminated by user")
-    ser.close()
-    window.close()
+        time.sleep(1)  # Opóźnienie między kolejnymi odczytami
+
+# Event Loop to process "events" and get the "values" of the inputs
+window_active, homepage_active = True, False
+
+# Start the sensor data handling in a separate thread
+sensor_thread = Thread(target=handle_sensor_data, daemon=True)
+sensor_thread.start()
+
+while True:
+    while window_active:
+        event, values = window.read(timeout=100)
+
+        if event == sg.WIN_CLOSED:
+            window_active = False
+            break
+
+        if event == 'Submit':
+            flower = values['-FLOWER-']
+            name = values['-NAME-']
+            if not flower or not name:
+                sg.popup('Error', 'All fields must be filled in!')
+            else:
+                print('Hello', name, '!')
+                window.hide()
+                homepage_window.un_hide()
+                homepage_active = True
+                window_active = False
+                break
+
+    while homepage_active:
+        event, values = homepage_window.read(timeout=100)
+
+        if event == sg.WIN_CLOSED:
+            homepage_active = False
+            break
+
+    time.sleep(1)  # Opóźnienie między kolejnymi odczytami
+
+ser.close()
+window.close()
+homepage_window.close()
